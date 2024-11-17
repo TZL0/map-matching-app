@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -22,17 +22,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: require('leaflet/dist/images/marker-icon.png'),
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
-
-const getCurrentTimeFormatted = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = ('0' + (now.getMonth() + 1)).slice(-2);
-  const day = ('0' + now.getDate()).slice(-2);
-  const hours = ('0' + now.getHours()).slice(-2);
-  const minutes = ('0' + now.getMinutes()).slice(-2);
-  const seconds = ('0' + now.getSeconds()).slice(-2);
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-};
 
 // Function to validate the time string
 function isValidDateTime(dateTimeString) {
@@ -76,6 +65,19 @@ const MapComponent = () => {
   const [showOriginalPolylines, setShowOriginalPolylines] = useState(true);
   const [routeLoaded, setRouteLoaded] = useState(false); // New state variable
 
+  // Refs to keep track of the latest state values
+  const simulationStatesRef = useRef(simulationStates);
+  const simulationDataRef = useRef(simulationData);
+
+  // Update refs whenever state changes
+  useEffect(() => {
+    simulationStatesRef.current = simulationStates;
+  }, [simulationStates]);
+
+  useEffect(() => {
+    simulationDataRef.current = simulationData;
+  }, [simulationData]);
+
   // Function to handle map clicks and add markers
   const MapClickHandler = () => {
     useMapEvents({
@@ -92,6 +94,17 @@ const MapComponent = () => {
     return null;
   };
 
+  const getCurrentTimeFormatted = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = ('0' + (now.getMonth() + 1)).slice(-2);
+    const day = ('0' + now.getDate()).slice(-2);
+    const hours = ('0' + now.getHours()).slice(-2);
+    const minutes = ('0' + now.getMinutes()).slice(-2);
+    const seconds = ('0' + now.getSeconds()).slice(-2);
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
+
   // Function to reset markers
   const handleResetMarkers = () => {
     setMarkers([]);
@@ -104,6 +117,81 @@ const MapComponent = () => {
       atIdx: -1,
     });
     setSimulationStates({ status: 'stopped' });
+  };
+
+  // Function to handle uploading route from CSV
+  const handleUploadRoute = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Reset markers and other states
+      handleResetMarkers();
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        parseCSVData(text);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  // Function to parse CSV data and set markers
+  const parseCSVData = (csvData) => {
+    const lines = csvData.trim().split('\n');
+    const headers = lines[0].split(',');
+
+    const idxIndex = headers.indexOf('idx');
+    const timeIndex = headers.indexOf('time');
+    const latIndex = headers.indexOf('lat');
+    const lngIndex = headers.indexOf('lng');
+    const altitudeIndex = headers.indexOf('altitude');
+
+    if (
+      idxIndex === -1 ||
+      timeIndex === -1 ||
+      latIndex === -1 ||
+      lngIndex === -1 ||
+      altitudeIndex === -1
+    ) {
+      alert('Invalid CSV format. Please ensure the headers are correct.');
+      return;
+    }
+
+    const newMarkers = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line === '') continue; // Skip empty lines
+      const values = line.split(',');
+
+      const idx = parseInt(values[idxIndex]);
+      const time = values[timeIndex];
+      const lat = parseFloat(values[latIndex]);
+      const lng = parseFloat(values[lngIndex]);
+      const altitude = parseFloat(values[altitudeIndex]);
+
+      if (
+        isNaN(idx) ||
+        !isValidDateTime(time) ||
+        isNaN(lat) ||
+        isNaN(lng) ||
+        isNaN(altitude)
+      ) {
+        alert(`Invalid data at line ${i + 1}. Please check the values.`);
+        return;
+      }
+
+      newMarkers.push({
+        lat,
+        lng,
+        time,
+        altitude,
+      });
+    }
+
+    setMarkers(newMarkers);
+    setRouteLoaded(true);
+    // Removed alert for successful upload
   };
 
   // Function to update a marker
@@ -161,7 +249,7 @@ const MapComponent = () => {
         const loadedMarkers = docSnapshot.data().markers;
         setMarkers(loadedMarkers);
         setRouteLoaded(true); // Indicate that the route has been loaded
-        alert('Route loaded successfully!');
+        // Removed alert for successful load
       } else {
         alert('No route found with that name.');
       }
@@ -385,16 +473,18 @@ const MapComponent = () => {
       setShowOriginalPolylines(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simulationStates.status, simulationData.atIdx]);
+  }, [simulationStates.status]);
 
-  const send_dynamic_map_matching_request = (i) => {
-    if (i >= markers.length || simulationStates.status !== 'running') {
+  const send_dynamic_map_matching_request = async (i) => {
+    if (i >= markers.length || simulationStatesRef.current.status !== 'running') {
       setSimulationStates({ status: 'stopped' });
       return;
     }
 
+    console.log('Sending request for index:', i);
+
     const payloadContent = {
-      active_states: simulationData.activeStates || [],
+      active_states: simulationDataRef.current.activeStates || [],
       coordinates: {
         Idx: i,
         Lat: String(markers[i].lat),
@@ -404,88 +494,93 @@ const MapComponent = () => {
       },
     };
 
-    // Adjust the request to match the server's expected format
-    fetch('http://localhost:8080/map_match_dynamic', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payloadContent),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        console.log('Request succeeded with JSON response:', data);
-
-        // Assuming the response is in the format of JsonAdaptedDynamicMapMatchingResponse
-        // Extract the necessary data
-        const result = data;
-
-        setSimulationData((prev) => ({
-          ...prev,
-          activeStates: result.active_states,
-          atIdx: i + 1,
-        }));
-
-        // Process committed subroutes
-        setCommittedSubroutes((prevCommitted) => {
-          let newCommitted = [...prevCommitted];
-          result.committed_subroutes.forEach((subroute) => {
-            // Remove overlapping provisional subroutes
-            setProvisionalSubroutes((prevProvisional) =>
-              prevProvisional.filter((p_subroute) => p_subroute.end_idx > subroute.end_idx)
-            );
-
-            const coords = subroute.coordinates.coordinates.map((coord) => [
-              parseFloat(coord.Lat),
-              parseFloat(coord.Lon),
-            ]);
-            newCommitted.push({
-              start_idx: subroute.start_idx,
-              end_idx: subroute.end_idx,
-              coords,
-            });
-
-            // Notify when a provisional subroute is committed
-            alert(
-              `Provisional subroute from index ${subroute.start_idx} to ${subroute.end_idx} has been committed.`
-            );
-          });
-          return newCommitted;
-        });
-
-        // Process provisional subroutes
-        setProvisionalSubroutes((prevProvisional) => {
-          let newProvisional = [...prevProvisional];
-          result.provisional_subroutes.forEach((subroute) => {
-            const coords = subroute.coordinates.coordinates.map((coord) => [
-              parseFloat(coord.Lat),
-              parseFloat(coord.Lon),
-            ]);
-            const start_idx = subroute.start_idx;
-            const end_idx = subroute.end_idx;
-
-            // Remove overlapping provisional subroutes
-            newProvisional = newProvisional.filter((r) => r.end_idx <= start_idx);
-
-            newProvisional.push({
-              start_idx,
-              end_idx,
-              coords,
-            });
-          });
-          return newProvisional;
-        });
-
-        // Continue simulation
-        if (simulationStates.status === 'running') {
-          setTimeout(() => {
-            send_dynamic_map_matching_request(i + 1);
-          }, 2500);
-        }
-      })
-      .catch((error) => {
-        console.error('Request failed:', error);
-        alert('Request failed: ' + error);
-        setSimulationStates({ status: 'stopped' });
+    try {
+      const response = await fetch('http://localhost:8080/map_match_dynamic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadContent),
       });
+      const data = await response.json();
+      console.log('Request succeeded with JSON response:', data);
+
+      // Assuming the response is in the format of JsonAdaptedDynamicMapMatchingResponse
+      // Extract the necessary data
+      const result = data;
+
+      setSimulationData((prev) => ({
+        ...prev,
+        activeStates: result.active_states,
+        atIdx: i + 1,
+      }));
+
+      // Update the ref to the latest simulationData
+      simulationDataRef.current = {
+        ...simulationDataRef.current,
+        activeStates: result.active_states,
+        atIdx: i + 1,
+      };
+
+      // Process committed subroutes
+      setCommittedSubroutes((prevCommitted) => {
+        let newCommitted = [...prevCommitted];
+        result.committed_subroutes.forEach((subroute) => {
+          // Remove overlapping provisional subroutes
+          setProvisionalSubroutes((prevProvisional) =>
+            prevProvisional.filter((p_subroute) => p_subroute.end_idx > subroute.end_idx)
+          );
+
+          const coords = subroute.coordinates.coordinates.map((coord) => [
+            parseFloat(coord.Lat),
+            parseFloat(coord.Lon),
+          ]);
+          newCommitted.push({
+            start_idx: subroute.start_idx,
+            end_idx: subroute.end_idx,
+            coords,
+          });
+
+          // Notify when a provisional subroute is committed
+          alert(
+            `Provisional subroute from index ${subroute.start_idx} to ${subroute.end_idx} has been committed.`
+          );
+        });
+        return newCommitted;
+      });
+
+      // Process provisional subroutes
+      setProvisionalSubroutes((prevProvisional) => {
+        let newProvisional = [...prevProvisional];
+        result.provisional_subroutes.forEach((subroute) => {
+          const coords = subroute.coordinates.coordinates.map((coord) => [
+            parseFloat(coord.Lat),
+            parseFloat(coord.Lon),
+          ]);
+          const start_idx = subroute.start_idx;
+          const end_idx = subroute.end_idx;
+
+          // Remove overlapping provisional subroutes
+          newProvisional = newProvisional.filter((r) => r.end_idx <= start_idx);
+
+          newProvisional.push({
+            start_idx,
+            end_idx,
+            coords,
+          });
+        });
+        return newProvisional;
+      });
+
+      // Continue simulation only if the status is still 'running'
+      if (simulationStatesRef.current.status === 'running') {
+        setTimeout(() => {
+          send_dynamic_map_matching_request(i + 1);
+        }, 2500);
+      }
+    } catch (error) {
+      console.error('Request failed:', error);
+      alert('Request failed: ' + error);
+      setSimulationStates({ status: 'stopped' });
+    }
   };
 
   // MapViewUpdater Component
@@ -494,14 +589,11 @@ const MapComponent = () => {
 
     useEffect(() => {
       if (routeLoaded && markers.length > 0) {
-        // Calculate the average latitude and longitude
-        const latSum = markers.reduce((acc, marker) => acc + marker.lat, 0);
-        const lngSum = markers.reduce((acc, marker) => acc + marker.lng, 0);
-        const avgLat = latSum / markers.length;
-        const avgLng = lngSum / markers.length;
+        // Create a LatLngBounds object from the markers
+        const bounds = L.latLngBounds(markers.map((marker) => [marker.lat, marker.lng]));
 
-        // Set the view to the average position
-        map.setView([avgLat, avgLng], map.getZoom(), { animate: true, duration: 0.5 });
+        // Adjust the map view to fit the bounds with some padding
+        map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 0.5 });
 
         // Reset routeLoaded to prevent repeated adjustments
         setRouteLoaded(false);
@@ -599,7 +691,7 @@ const MapComponent = () => {
         ))}
       </MapContainer>
 
-      <Draggable>
+      <Draggable bounds='parent'>
         <div
           style={{
             position: 'absolute',
@@ -608,81 +700,107 @@ const MapComponent = () => {
             width: '420px',
             padding: '10px',
             backgroundColor: '#f9f9f9',
-            overflowY: 'auto',
             boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
             cursor: 'move',
             opacity: 0.9,
             zIndex: 1000,
+            maxHeight: '70%',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          <h3>Editor Pane</h3>
-          <button onClick={handleResetMarkers} style={{ marginBottom: '10px' }}>
-            Reset Markers
-          </button>
-          <h4>Route</h4>
-          <div style={{ marginBottom: '10px' }}>
-            <label htmlFor='routeName'>Name</label>
-            <input
-              type='text'
-              id='routeName'
-              value={routeName}
-              onChange={(e) => setRouteName(e.target.value)}
-              style={{ width: '40%', marginLeft: '10px' }}
-            />
-            <button style={{ marginLeft: '10px' }} onClick={handleSaveRoute}>
-              Save
-            </button>
-            <button style={{ marginLeft: '10px' }} onClick={handleLoadRoute}>
-              Load
-            </button>
-            <button style={{ marginLeft: '10px' }} onClick={handleDeleteRoute}>
-              Delete
-            </button>
+          <div style={{ flexShrink: 0 }}>
+            <h3>Editor Pane</h3>
+            <div style={{ marginBottom: '10px' }}>
+              <button onClick={handleResetMarkers} style={{ marginRight: '10px' }}>
+                Reset Markers
+              </button>
+              <label htmlFor='uploadRoute' style={{ marginRight: '10px', cursor: 'pointer' }}>
+                <input
+                  type='file'
+                  id='uploadRoute'
+                  accept='.csv'
+                  style={{ display: 'none' }}
+                  onChange={handleUploadRoute}
+                />
+                <span style={{ textDecoration: 'underline', color: 'blue' }}>Upload Route</span>
+              </label>
+            </div>
+            <h4>Route</h4>
+            <div style={{ marginBottom: '10px' }}>
+              <label htmlFor='routeName'>Name</label>
+              <input
+                type='text'
+                id='routeName'
+                value={routeName}
+                onChange={(e) => setRouteName(e.target.value)}
+                style={{ width: '40%', marginLeft: '10px' }}
+              />
+              <button style={{ marginLeft: '10px' }} onClick={handleSaveRoute}>
+                Save
+              </button>
+              <button style={{ marginLeft: '10px' }} onClick={handleLoadRoute}>
+                Load
+              </button>
+              <button style={{ marginLeft: '10px' }} onClick={handleDeleteRoute}>
+                Delete
+              </button>
+            </div>
           </div>
 
           {markers.length > 0 ? (
-            <table
+            <div
               style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                tableLayout: 'fixed',
+                flexGrow: 1,
+                overflowY: 'auto',
               }}
             >
-              <colgroup>
-                <col style={{ width: '5%' }} />
-                <col style={{ width: '25%' }} />
-                <col style={{ width: '25%' }} />
-                <col style={{ width: '35%' }} />
-                <col style={{ width: '10%' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>#</th>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Lat</th>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Lng</th>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Time</th>
-                  <th style={{ textAlign: 'left', padding: '4px' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {markers.map((marker, idx) => (
-                  <MarkerRow
-                    key={idx}
-                    marker={marker}
-                    index={idx}
-                    handleMarkerUpdate={handleMarkerUpdate}
-                    handleRemoveMarker={handleRemoveMarker}
-                  />
-                ))}
-              </tbody>
-            </table>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  tableLayout: 'fixed',
+                }}
+              >
+                <colgroup>
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '25%' }} />
+                  <col style={{ width: '35%' }} />
+                  <col style={{ width: '10%' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '4px' }}>#</th>
+                    <th style={{ textAlign: 'left', padding: '4px' }}>Lat</th>
+                    <th style={{ textAlign: 'left', padding: '4px' }}>Lng</th>
+                    <th style={{ textAlign: 'left', padding: '4px' }}>Time</th>
+                    <th style={{ textAlign: 'left', padding: '4px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {markers.map((marker, idx) => (
+                    <MarkerRow
+                      key={idx}
+                      marker={marker}
+                      index={idx}
+                      handleMarkerUpdate={handleMarkerUpdate}
+                      handleRemoveMarker={handleRemoveMarker}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
-          <p>
-            <b>Click</b> on the map to add markers.
-          </p>
-          {markers.length > 1 ? (
-            <p>Edit markers by dragging them, or by changing the values in the table above.</p>
-          ) : null}
+          <div style={{ flexShrink: 0 }}>
+            <p>
+              <b>Click</b> on the map to add markers.
+            </p>
+            {markers.length > 1 ? (
+              <p>Edit markers by dragging them, or by changing the values in the table above.</p>
+            ) : null}
+          </div>
         </div>
       </Draggable>
     </div>
