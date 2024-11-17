@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -32,6 +32,34 @@ const getCurrentTimeFormatted = () => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 };
 
+// Function to validate the time string
+function isValidDateTime(dateTimeString) {
+  // Regular expression to match the date and time format YYYY-MM-DD HH:MM:SS
+  const dateTimeRegex = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\s(0\d|1\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+
+  // Test the string against the regular expression
+  if (!dateTimeRegex.test(dateTimeString)) {
+    return false;
+  }
+
+  // Parse the date and time components
+  const [datePart, timePart] = dateTimeString.split(' ');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hours, minutes, seconds] = timePart.split(':').map(Number);
+
+  // Check if the date is valid using Date object
+  const date = new Date(year, month - 1, day, hours, minutes, seconds);
+
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day &&
+    date.getHours() === hours &&
+    date.getMinutes() === minutes &&
+    date.getSeconds() === seconds
+  );
+}
+
 const MapComponent = () => {
   const [markers, setMarkers] = useState([]);
   const [routeName, setRouteName] = useState('');
@@ -57,22 +85,13 @@ const MapComponent = () => {
     setMarkers([]);
   };
 
-  // Function to handle marker field changes
-  const handleMarkerChange = (index, field, value) => {
+  // Function to update a marker
+  const handleMarkerUpdate = (index, updatedMarker) => {
     setMarkers((prevMarkers) => {
       const newMarkers = [...prevMarkers];
-      let updatedValue = value;
-      if (field === 'lat' || field === 'lng') {
-        updatedValue = parseFloat(value);
-        if (isNaN(updatedValue)) {
-          updatedValue = '';
-        } else {
-          updatedValue = parseFloat(updatedValue.toFixed(6));
-        }
-      }
       newMarkers[index] = {
         ...newMarkers[index],
-        [field]: updatedValue,
+        ...updatedMarker,
       };
       return newMarkers;
     });
@@ -160,6 +179,144 @@ const MapComponent = () => {
     });
   };
 
+  // MarkerRow Component
+  const MarkerRow = ({ marker, index, handleMarkerUpdate, handleRemoveMarker }) => {
+    const [latInput, setLatInput] = useState(marker.lat);
+    const [lngInput, setLngInput] = useState(marker.lng);
+    const [timeInput, setTimeInput] = useState(marker.time);
+
+    const [prevLat, setPrevLat] = useState(marker.lat);
+    const [prevLng, setPrevLng] = useState(marker.lng);
+    const [prevTime, setPrevTime] = useState(marker.time);
+
+    const [latError, setLatError] = useState(false);
+    const [lngError, setLngError] = useState(false);
+    const [timeError, setTimeError] = useState(false);
+
+    useEffect(() => {
+      setLatInput(marker.lat);
+      setLngInput(marker.lng);
+      setTimeInput(marker.time);
+      setPrevLat(marker.lat);
+      setPrevLng(marker.lng);
+      setPrevTime(marker.time);
+    }, [marker]);
+
+    const handleLatBlur = () => {
+      const updatedLat = parseFloat(latInput);
+
+      if (isNaN(updatedLat) || updatedLat < -90 || updatedLat > 90) {
+        setLatError(true);
+        setTimeout(() => {
+          setLatInput(prevLat);
+          setLatError(false);
+        }, 1000);
+      } else {
+        handleMarkerUpdate(index, {
+          lat: parseFloat(updatedLat.toFixed(6)),
+        });
+        setPrevLat(updatedLat);
+      }
+    };
+
+    const handleLngBlur = () => {
+      const updatedLng = parseFloat(lngInput);
+
+      if (isNaN(updatedLng) || updatedLng < -180 || updatedLng > 180) {
+        setLngError(true);
+        setTimeout(() => {
+          setLngInput(prevLng);
+          setLngError(false);
+        }, 1000);
+      } else {
+        handleMarkerUpdate(index, {
+          lng: parseFloat(updatedLng.toFixed(6)),
+        });
+        setPrevLng(updatedLng);
+      }
+    };
+
+    const handleTimeBlur = () => {
+      if (!isValidDateTime(timeInput)) {
+        setTimeError(true);
+        setTimeout(() => {
+          setTimeInput(prevTime);
+          setTimeError(false);
+        }, 1000);
+      } else {
+        handleMarkerUpdate(index, {
+          time: timeInput,
+        });
+        setPrevTime(timeInput);
+      }
+    };
+
+    return (
+      <tr key={index}>
+        <td style={{ padding: '4px', verticalAlign: 'top' }}>{index + 1}</td>
+        <td style={{ padding: '4px', verticalAlign: 'top' }}>
+          <input
+            type='number'
+            step='0.00001'
+            value={latInput !== '' ? latInput : ''}
+            onChange={(e) => setLatInput(e.target.value)}
+            onBlur={handleLatBlur}
+            style={{
+              width: '100%',
+              borderColor: latError ? 'red' : undefined,
+            }}
+          />
+        </td>
+        <td style={{ padding: '4px', verticalAlign: 'top' }}>
+          <input
+            type='number'
+            step='0.00001'
+            value={lngInput !== '' ? lngInput : ''}
+            onChange={(e) => setLngInput(e.target.value)}
+            onBlur={handleLngBlur}
+            style={{
+              width: '100%',
+              borderColor: lngError ? 'red' : undefined,
+            }}
+          />
+        </td>
+        <td style={{ padding: '4px', verticalAlign: 'top' }}>
+          <input
+            type='text'
+            value={timeInput}
+            onChange={(e) => setTimeInput(e.target.value)}
+            onBlur={handleTimeBlur}
+            style={{
+              width: '100%',
+              borderColor: timeError ? 'red' : undefined,
+            }}
+          />
+        </td>
+        <td
+          style={{
+            padding: '4px',
+            verticalAlign: 'top',
+            textAlign: 'center',
+          }}
+        >
+          <button
+            onClick={() => handleRemoveMarker(index)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'red',
+              cursor: 'pointer',
+              fontSize: '16px',
+            }}
+            title='Remove Marker'
+          >
+            &#10005;
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div style={{ position: 'relative', height: '100vh' }}>
       <MapContainer
@@ -181,7 +338,6 @@ const MapComponent = () => {
               draggable={true}
               eventHandlers={{
                 drag: (event) => handleMarkerDrag(idx, event),
-
               }}
             >
               <Popup>
@@ -241,99 +397,49 @@ const MapComponent = () => {
             </button>
           </div>
 
-          {markers.length>0 ? <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              tableLayout: 'fixed',
-            }}
-          >
-            <colgroup>
-              <col style={{ width: '5%' }} />
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '35%' }} />
-              <col style={{ width: '10%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '4px' }}>#</th>
-                <th style={{ textAlign: 'left', padding: '4px' }}>Lat</th>
-                <th style={{ textAlign: 'left', padding: '4px' }}>Lng</th>
-                <th style={{ textAlign: 'left', padding: '4px' }}>Time</th>
-                <th style={{ textAlign: 'left', padding: '4px' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {markers.map((marker, idx) => (
-                <tr key={idx}>
-                  <td style={{ padding: '4px', verticalAlign: 'top' }}>
-                    {idx + 1}
-                  </td>
-                  <td style={{ padding: '4px', verticalAlign: 'top' }}>
-                    <input
-                      type='number'
-                      step='0.0001'
-                      value={marker.lat !== '' ? marker.lat.toFixed(6) : ''}
-                      onChange={(e) =>
-                        handleMarkerChange(idx, 'lat', e.target.value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                  </td>
-                  <td style={{ padding: '4px', verticalAlign: 'top' }}>
-                    <input
-                      type='number'
-                      step='0.000001'
-                      value={marker.lng !== '' ? marker.lng.toFixed(6) : ''}
-                      onChange={(e) =>
-                        handleMarkerChange(idx, 'lng', e.target.value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                  </td>
-                  <td style={{ padding: '4px', verticalAlign: 'top' }}>
-                    <input
-                      type='text'
-                      value={marker.time}
-                      onChange={(e) =>
-                        handleMarkerChange(idx, 'time', e.target.value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                  </td>
-                  <td
-                    style={{
-                      padding: '4px',
-                      verticalAlign: 'top',
-                      textAlign: 'center',
-                    }}
-                  >
-                    <button
-                      onClick={() => handleRemoveMarker(idx)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'red',
-                        cursor: 'pointer',
-                        fontSize: '16px',
-                      }}
-                      title='Remove Marker'
-                    >
-                      &#10005;
-                    </button>
-                  </td>
+          {markers.length > 0 ? (
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                tableLayout: 'fixed',
+              }}
+            >
+              <colgroup>
+                <col style={{ width: '5%' }} />
+                <col style={{ width: '25%' }} />
+                <col style={{ width: '25%' }} />
+                <col style={{ width: '35%' }} />
+                <col style={{ width: '10%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>#</th>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>Lat</th>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>Lng</th>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>Time</th>
+                  <th style={{ textAlign: 'left', padding: '4px' }}></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>:null}
-          <p>
-            Click on the map to add markers.
-          </p>
-          {markers.length > 1
-           ? <p>
+              </thead>
+              <tbody>
+                {markers.map((marker, idx) => (
+                  <MarkerRow
+                    key={idx}
+                    marker={marker}
+                    index={idx}
+                    handleMarkerUpdate={handleMarkerUpdate}
+                    handleRemoveMarker={handleRemoveMarker}
+                  />
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+          <p><b>Click</b> on the map to add markers.</p>
+          {markers.length > 1 ? (
+            <p>
               Edit markers by dragging them, or by changing the values in the table above.
-             </p>:null}
+            </p>
+          ) : null}
         </div>
       </Draggable>
     </div>
