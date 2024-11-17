@@ -6,6 +6,8 @@ import {
   Popup,
   Polyline,
   useMapEvents,
+  Tooltip,
+  useMap,
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -63,6 +65,16 @@ function isValidDateTime(dateTimeString) {
 const MapComponent = () => {
   const [markers, setMarkers] = useState([]);
   const [routeName, setRouteName] = useState('');
+  const [simulationStates, setSimulationStates] = useState({ status: 'stopped' });
+  const [simulationData, setSimulationData] = useState({
+    items: [],
+    activeStates: [],
+    atIdx: -1,
+  });
+  const [committedSubroutes, setCommittedSubroutes] = useState([]);
+  const [provisionalSubroutes, setProvisionalSubroutes] = useState([]);
+  const [showOriginalPolylines, setShowOriginalPolylines] = useState(true);
+  const [routeLoaded, setRouteLoaded] = useState(false); // New state variable
 
   // Function to handle map clicks and add markers
   const MapClickHandler = () => {
@@ -83,6 +95,15 @@ const MapComponent = () => {
   // Function to reset markers
   const handleResetMarkers = () => {
     setMarkers([]);
+    setCommittedSubroutes([]);
+    setProvisionalSubroutes([]);
+    setShowOriginalPolylines(true);
+    setSimulationData({
+      items: [],
+      activeStates: [],
+      atIdx: -1,
+    });
+    setSimulationStates({ status: 'stopped' });
   };
 
   // Function to update a marker
@@ -137,7 +158,9 @@ const MapComponent = () => {
       const docSnapshot = await getDoc(routeDocRef);
 
       if (docSnapshot.exists()) {
-        setMarkers(docSnapshot.data().markers);
+        const loadedMarkers = docSnapshot.data().markers;
+        setMarkers(loadedMarkers);
+        setRouteLoaded(true); // Indicate that the route has been loaded
         alert('Route loaded successfully!');
       } else {
         alert('No route found with that name.');
@@ -150,8 +173,8 @@ const MapComponent = () => {
 
   // Function to delete the loaded route from Firestore
   const handleDeleteRoute = async () => {
-    if (!routeName || markers.length === 0) {
-      alert('Please load a route before trying to delete.');
+    if (!routeName) {
+      alert('Please enter a route name.');
       return;
     }
     try {
@@ -317,18 +340,216 @@ const MapComponent = () => {
     );
   };
 
+  // Function to handle simulation controls
+  const dynamic_map_match = () => {
+    if (simulationStates.status === 'stopped' || simulationStates.status === 'paused') {
+      if (markers.length > 1) {
+        setSimulationStates({ status: 'running' });
+        if (simulationData.atIdx < 0) {
+          const items = markers.map((marker) => ({
+            coords: [marker.lat, marker.lng, new Date(marker.time)],
+          }));
+          setSimulationData((prev) => ({
+            ...prev,
+            atIdx: 0,
+            items: items,
+          }));
+        }
+      } else {
+        alert('Not enough simulation data!');
+      }
+    } else if (simulationStates.status === 'running') {
+      setSimulationStates({ status: 'paused' });
+    }
+  };
+
+  const handleStop = () => {
+    setSimulationStates({ status: 'stopped' });
+    setSimulationData({
+      items: [],
+      activeStates: [],
+      atIdx: -1,
+    });
+    setCommittedSubroutes([]);
+    setProvisionalSubroutes([]);
+    setShowOriginalPolylines(true);
+  };
+
+  useEffect(() => {
+    if (simulationStates.status === 'running') {
+      if (simulationData.atIdx >= 0) {
+        setShowOriginalPolylines(false);
+        send_dynamic_map_matching_request(simulationData.atIdx);
+      }
+    } else if (simulationStates.status === 'stopped') {
+      setShowOriginalPolylines(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulationStates.status, simulationData.atIdx]);
+
+  const send_dynamic_map_matching_request = (i) => {
+    if (i >= markers.length || simulationStates.status !== 'running') {
+      setSimulationStates({ status: 'stopped' });
+      return;
+    }
+
+    const payloadContent = {
+      active_states: simulationData.activeStates || [],
+      coordinates: {
+        Idx: i,
+        Lat: String(markers[i].lat),
+        Lon: String(markers[i].lng),
+        RegisteredTime: markers[i].time,
+        Type: 'Route',
+      },
+    };
+
+    // Adjust the request to match the server's expected format
+    fetch('http://localhost:8080/map_match_dynamic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payloadContent),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        console.log('Request succeeded with JSON response:', data);
+
+        // Assuming the response is in the format of JsonAdaptedDynamicMapMatchingResponse
+        // Extract the necessary data
+        const result = data;
+
+        setSimulationData((prev) => ({
+          ...prev,
+          activeStates: result.active_states,
+          atIdx: i + 1,
+        }));
+
+        // Process committed subroutes
+        setCommittedSubroutes((prevCommitted) => {
+          let newCommitted = [...prevCommitted];
+          result.committed_subroutes.forEach((subroute) => {
+            // Remove overlapping provisional subroutes
+            setProvisionalSubroutes((prevProvisional) =>
+              prevProvisional.filter((p_subroute) => p_subroute.end_idx > subroute.end_idx)
+            );
+
+            const coords = subroute.coordinates.coordinates.map((coord) => [
+              parseFloat(coord.Lat),
+              parseFloat(coord.Lon),
+            ]);
+            newCommitted.push({
+              start_idx: subroute.start_idx,
+              end_idx: subroute.end_idx,
+              coords,
+            });
+
+            // Notify when a provisional subroute is committed
+            alert(
+              `Provisional subroute from index ${subroute.start_idx} to ${subroute.end_idx} has been committed.`
+            );
+          });
+          return newCommitted;
+        });
+
+        // Process provisional subroutes
+        setProvisionalSubroutes((prevProvisional) => {
+          let newProvisional = [...prevProvisional];
+          result.provisional_subroutes.forEach((subroute) => {
+            const coords = subroute.coordinates.coordinates.map((coord) => [
+              parseFloat(coord.Lat),
+              parseFloat(coord.Lon),
+            ]);
+            const start_idx = subroute.start_idx;
+            const end_idx = subroute.end_idx;
+
+            // Remove overlapping provisional subroutes
+            newProvisional = newProvisional.filter((r) => r.end_idx <= start_idx);
+
+            newProvisional.push({
+              start_idx,
+              end_idx,
+              coords,
+            });
+          });
+          return newProvisional;
+        });
+
+        // Continue simulation
+        if (simulationStates.status === 'running') {
+          setTimeout(() => {
+            send_dynamic_map_matching_request(i + 1);
+          }, 2500);
+        }
+      })
+      .catch((error) => {
+        console.error('Request failed:', error);
+        alert('Request failed: ' + error);
+        setSimulationStates({ status: 'stopped' });
+      });
+  };
+
+  // MapViewUpdater Component
+  const MapViewUpdater = ({ markers, routeLoaded, setRouteLoaded }) => {
+    const map = useMap();
+
+    useEffect(() => {
+      if (routeLoaded && markers.length > 0) {
+        // Calculate the average latitude and longitude
+        const latSum = markers.reduce((acc, marker) => acc + marker.lat, 0);
+        const lngSum = markers.reduce((acc, marker) => acc + marker.lng, 0);
+        const avgLat = latSum / markers.length;
+        const avgLng = lngSum / markers.length;
+
+        // Set the view to the average position
+        map.setView([avgLat, avgLng], map.getZoom(), { animate: true, duration: 0.5 });
+
+        // Reset routeLoaded to prevent repeated adjustments
+        setRouteLoaded(false);
+      }
+    }, [routeLoaded, markers, map, setRouteLoaded]);
+
+    return null;
+  };
+
   return (
     <div style={{ position: 'relative', height: '100vh' }}>
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '10px',
+          backgroundColor: '#f9f9f9',
+          zIndex: 1000,
+        }}
+      >
+        <h1>Map Matching App</h1>
+        <div>
+          <button onClick={dynamic_map_match} style={{ marginRight: '10px' }}>
+            {simulationStates.status === 'running'
+              ? 'Pause'
+              : simulationStates.status === 'paused'
+              ? 'Continue Match'
+              : 'Match Dynamically'}
+          </button>
+          <button onClick={handleStop}>Stop</button>
+        </div>
+      </header>
       <MapContainer
         center={[34.0056365, -118.1658475]}
         zoom={11}
-        style={{ height: '100%', width: '100%' }}
+        style={{ height: 'calc(100% - 60px)', width: '100%' }}
       >
         <TileLayer
           url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
           attribution='&copy; OpenStreetMap contributors'
         />
         <MapClickHandler />
+        <MapViewUpdater
+          markers={markers}
+          routeLoaded={routeLoaded}
+          setRouteLoaded={setRouteLoaded}
+        />
         {markers
           .filter((marker) => !isNaN(marker.lat) && !isNaN(marker.lng))
           .map((marker, idx) => (
@@ -340,6 +561,9 @@ const MapComponent = () => {
                 drag: (event) => handleMarkerDrag(idx, event),
               }}
             >
+              <Tooltip direction='top' offset={[0, -20]} permanent>
+                {idx + 1}
+              </Tooltip>
               <Popup>
                 Marker at {marker.lat.toFixed(6)}, {marker.lng.toFixed(6)}
                 <br />
@@ -347,20 +571,39 @@ const MapComponent = () => {
               </Popup>
             </Marker>
           ))}
-        {markers.length > 1 && (
+        {showOriginalPolylines && markers.length > 1 && (
           <Polyline
             positions={markers
               .filter((marker) => !isNaN(marker.lat) && !isNaN(marker.lng))
               .map((marker) => [marker.lat, marker.lng])}
           />
         )}
+        {/* Render committed subroutes */}
+        {committedSubroutes.map((subroute, idx) => (
+          <Polyline
+            key={`committed-${idx}`}
+            positions={subroute.coords}
+            color='purple'
+            weight={5}
+          />
+        ))}
+        {/* Render provisional subroutes */}
+        {provisionalSubroutes.map((subroute, idx) => (
+          <Polyline
+            key={`provisional-${idx}`}
+            positions={subroute.coords}
+            color='purple'
+            dashArray='5,10'
+            weight={3}
+          />
+        ))}
       </MapContainer>
 
       <Draggable>
         <div
           style={{
             position: 'absolute',
-            top: '10px',
+            top: '70px',
             right: '10px',
             width: '420px',
             padding: '10px',
@@ -434,11 +677,11 @@ const MapComponent = () => {
               </tbody>
             </table>
           ) : null}
-          <p><b>Click</b> on the map to add markers.</p>
+          <p>
+            <b>Click</b> on the map to add markers.
+          </p>
           {markers.length > 1 ? (
-            <p>
-              Edit markers by dragging them, or by changing the values in the table above.
-            </p>
+            <p>Edit markers by dragging them, or by changing the values in the table above.</p>
           ) : null}
         </div>
       </Draggable>
