@@ -63,7 +63,7 @@ const MapComponent = () => {
   const [committedSubroutes, setCommittedSubroutes] = useState([]);
   const [provisionalSubroutes, setProvisionalSubroutes] = useState([]);
   const [showOriginalPolylines, setShowOriginalPolylines] = useState(true);
-  const [routeLoaded, setRouteLoaded] = useState(false); // New state variable
+  const [routeLoaded, setRouteLoaded] = useState(false);
 
   // Refs to keep track of the latest state values
   const simulationStatesRef = useRef(simulationStates);
@@ -132,6 +132,9 @@ const MapComponent = () => {
         parseCSVData(text);
       };
       reader.readAsText(file);
+
+      // Reset the file input to allow uploading the same file again
+      event.target.value = '';
     }
   };
 
@@ -182,8 +185,8 @@ const MapComponent = () => {
       }
 
       newMarkers.push({
-        lat,
-        lng,
+        lat: parseFloat(lat.toFixed(6)),
+        lng: parseFloat(lng.toFixed(6)),
         time,
         altitude,
       });
@@ -191,7 +194,6 @@ const MapComponent = () => {
 
     setMarkers(newMarkers);
     setRouteLoaded(true);
-    // Removed alert for successful upload
   };
 
   // Function to update a marker
@@ -249,7 +251,6 @@ const MapComponent = () => {
         const loadedMarkers = docSnapshot.data().markers;
         setMarkers(loadedMarkers);
         setRouteLoaded(true); // Indicate that the route has been loaded
-        // Removed alert for successful load
       } else {
         alert('No route found with that name.');
       }
@@ -292,12 +293,12 @@ const MapComponent = () => {
 
   // MarkerRow Component
   const MarkerRow = ({ marker, index, handleMarkerUpdate, handleRemoveMarker }) => {
-    const [latInput, setLatInput] = useState(marker.lat);
-    const [lngInput, setLngInput] = useState(marker.lng);
+    const [latInput, setLatInput] = useState(marker.lat.toFixed(6));
+    const [lngInput, setLngInput] = useState(marker.lng.toFixed(6));
     const [timeInput, setTimeInput] = useState(marker.time);
 
-    const [prevLat, setPrevLat] = useState(marker.lat);
-    const [prevLng, setPrevLng] = useState(marker.lng);
+    const [prevLat, setPrevLat] = useState(marker.lat.toFixed(6));
+    const [prevLng, setPrevLng] = useState(marker.lng.toFixed(6));
     const [prevTime, setPrevTime] = useState(marker.time);
 
     const [latError, setLatError] = useState(false);
@@ -305,11 +306,11 @@ const MapComponent = () => {
     const [timeError, setTimeError] = useState(false);
 
     useEffect(() => {
-      setLatInput(marker.lat);
-      setLngInput(marker.lng);
+      setLatInput(marker.lat.toFixed(6));
+      setLngInput(marker.lng.toFixed(6));
       setTimeInput(marker.time);
-      setPrevLat(marker.lat);
-      setPrevLng(marker.lng);
+      setPrevLat(marker.lat.toFixed(6));
+      setPrevLng(marker.lng.toFixed(6));
       setPrevTime(marker.time);
     }, [marker]);
 
@@ -326,7 +327,7 @@ const MapComponent = () => {
         handleMarkerUpdate(index, {
           lat: parseFloat(updatedLat.toFixed(6)),
         });
-        setPrevLat(updatedLat);
+        setPrevLat(updatedLat.toFixed(6));
       }
     };
 
@@ -343,7 +344,7 @@ const MapComponent = () => {
         handleMarkerUpdate(index, {
           lng: parseFloat(updatedLng.toFixed(6)),
         });
-        setPrevLng(updatedLng);
+        setPrevLng(updatedLng.toFixed(6));
       }
     };
 
@@ -368,7 +369,7 @@ const MapComponent = () => {
         <td style={{ padding: '4px', verticalAlign: 'top' }}>
           <input
             type='number'
-            step='0.00001'
+            step='0.000001'
             value={latInput !== '' ? latInput : ''}
             onChange={(e) => setLatInput(e.target.value)}
             onBlur={handleLatBlur}
@@ -381,7 +382,7 @@ const MapComponent = () => {
         <td style={{ padding: '4px', verticalAlign: 'top' }}>
           <input
             type='number'
-            step='0.00001'
+            step='0.000001'
             value={lngInput !== '' ? lngInput : ''}
             onChange={(e) => setLngInput(e.target.value)}
             onBlur={handleLngBlur}
@@ -475,6 +476,41 @@ const MapComponent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simulationStates.status]);
 
+    // Function to get the first points of all provisional subroutes
+  const getFirstPointsOfProvisionalSubroutes = () => {
+    // Map through each provisional subroute and extract the first coordinate
+    return provisionalSubroutes ? provisionalSubroutes.map((subroute) => {
+      const firstCoord = subroute.coords[0]; // Get the first coordinate
+      return {
+        Lat: firstCoord[0],
+        Lon: firstCoord[1],
+        Idx: subroute.start_idx,
+      };
+    }) : [];
+  };
+
+  const getLastPointOfCommittedSubroutes = () => {
+    if (committedSubroutes.length > 0) {
+      const lastSubroute = committedSubroutes[committedSubroutes.length - 1];
+      const lastCoord = lastSubroute.coords[lastSubroute.coords.length - 1];
+      return {
+        Lat: lastCoord[0],
+        Lon: lastCoord[1],
+        Idx: lastSubroute.end_idx,
+      };
+    }
+    return null;
+  };
+
+  const getAlternativeParents = () => {
+    const lastPoint = getLastPointOfCommittedSubroutes();
+    const firstPoints = getFirstPointsOfProvisionalSubroutes();
+    if (lastPoint) {
+      return [lastPoint, ...firstPoints];
+    }
+    return firstPoints;
+  };
+
   const send_dynamic_map_matching_request = async (i) => {
     if (i >= markers.length || simulationStatesRef.current.status !== 'running') {
       setSimulationStates({ status: 'stopped' });
@@ -492,6 +528,7 @@ const MapComponent = () => {
         RegisteredTime: markers[i].time,
         Type: 'Route',
       },
+      alternative_parents: getAlternativeParents(),
     };
 
     try {
@@ -503,10 +540,10 @@ const MapComponent = () => {
       const data = await response.json();
       console.log('Request succeeded with JSON response:', data);
 
-      // Assuming the response is in the format of JsonAdaptedDynamicMapMatchingResponse
-      // Extract the necessary data
+      // Extract the necessary data from the response
       const result = data;
 
+      // Update activeStates and atIdx
       setSimulationData((prev) => ({
         ...prev,
         activeStates: result.active_states,
@@ -520,34 +557,33 @@ const MapComponent = () => {
         atIdx: i + 1,
       };
 
-      // Process committed subroutes
-      setCommittedSubroutes((prevCommitted) => {
-        let newCommitted = [...prevCommitted];
-        result.committed_subroutes.forEach((subroute) => {
-          // Remove overlapping provisional subroutes
-          setProvisionalSubroutes((prevProvisional) =>
-            prevProvisional.filter((p_subroute) => p_subroute.end_idx > subroute.end_idx)
-          );
+      // Extract committed_idx from the response
+      const committedIdx = result.committed_idx;
 
-          const coords = subroute.coordinates.coordinates.map((coord) => [
-            parseFloat(coord.Lat),
-            parseFloat(coord.Lon),
-          ]);
-          newCommitted.push({
-            start_idx: subroute.start_idx,
-            end_idx: subroute.end_idx,
-            coords,
-          });
+      // Move provisional subroutes with end_idx <= committedIdx to committedSubroutes
+      setProvisionalSubroutes((prevProvisional) => {
+        const newProvisional = [];
+        const committedSubroutesFromProvisional = [];
 
-          // Notify when a provisional subroute is committed
-          alert(
-            `Provisional subroute from index ${subroute.start_idx} to ${subroute.end_idx} has been committed.`
-          );
+        prevProvisional.forEach((subroute) => {
+          if (subroute.end_idx <= committedIdx) {
+            committedSubroutesFromProvisional.push(subroute);
+          } else {
+            newProvisional.push(subroute);
+          }
         });
-        return newCommitted;
+
+        if (committedSubroutesFromProvisional.length > 0) {
+          setCommittedSubroutes((prevCommitted) => [
+            ...prevCommitted,
+            ...committedSubroutesFromProvisional,
+          ]);
+        }
+
+        return newProvisional;
       });
 
-      // Process provisional subroutes
+      // Process new provisional subroutes from the response
       setProvisionalSubroutes((prevProvisional) => {
         let newProvisional = [...prevProvisional];
         result.provisional_subroutes.forEach((subroute) => {
@@ -566,11 +602,13 @@ const MapComponent = () => {
             end_idx,
             coords,
           });
+
+          console.log('New provisional subroute:', start_idx, end_idx);
         });
         return newProvisional;
       });
 
-      // Continue simulation only if the status is still 'running'
+      // Continue simulation if still running
       if (simulationStatesRef.current.status === 'running') {
         setTimeout(() => {
           send_dynamic_map_matching_request(i + 1);
@@ -653,13 +691,15 @@ const MapComponent = () => {
                 drag: (event) => handleMarkerDrag(idx, event),
               }}
             >
-              <Tooltip direction='top' offset={[0, -20]} permanent>
+              <Tooltip direction='top' offset={[-14, -20]} permanent>
                 {idx + 1}
               </Tooltip>
               <Popup>
                 Marker at {marker.lat.toFixed(6)}, {marker.lng.toFixed(6)}
                 <br />
                 Time: {marker.time}
+                <br />
+                <button onClick={() => handleRemoveMarker(idx)}>Remove</button>
               </Popup>
             </Marker>
           ))}
