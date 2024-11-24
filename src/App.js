@@ -1,6 +1,5 @@
-
-import MapComponent from './components/MapComponent';
 import './App.css';
+import Container from './components/Container';
 
 function App() {
   // return (
@@ -24,7 +23,7 @@ function App() {
   return (
     <div>
       {/* <h1>Map Matching App</h1> */}
-      <MapComponent />
+      <Container />
     </div>
   );
 }
