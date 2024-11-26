@@ -95,19 +95,6 @@ const MapComponent = ({
 
   return (
     <div style={{ position: 'relative', height: 'calc(100% - 60px)' }}>
-      {/* Add the button to toggle markers */}
-      <button
-        onClick={() => setShowMarkers((prev) => !prev)}
-        style={{
-          position: 'absolute',
-          zIndex: 1000,
-          top: 10,
-          right: 10,
-          padding: '5px 10px',
-        }}
-      >
-        {showMarkers ? 'Hide Markers' : 'Show Markers'}
-      </button>
 
       <MapContainer
         center={[34.0056365, -118.1658475]}

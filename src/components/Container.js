@@ -274,6 +274,11 @@ const Container = () => {
                   (r) => r.end_idx <= connectionSubroute[0].start_idx
                 );
 
+                // Remove overlapping committed subroutes
+                setCommittedSubroutes((prevCommitted) =>
+                  prevCommitted.filter((r) => r.end_idx <= connectionSubroute[0].start_idx)
+                );
+
                 console.log('Connection subroute found:', connectionSubroute);
                 newProvisional.push(...connectionSubroute, {
                   start_idx,
