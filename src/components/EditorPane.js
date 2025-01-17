@@ -47,6 +47,7 @@ const EditorPane = ({
   showMarkers,
   setShowMarkers,
   setRouteLoaded,
+  resetSimulation,
 }) => {
   // Function to parse CSV data and set markers
   const parseCSVData = (csvData) => {
@@ -104,6 +105,7 @@ const EditorPane = ({
 
     setMarkers(newMarkers);
     setRouteLoaded(true);
+    resetSimulation();
   };
 
   // Function to handle uploading route from CSV
@@ -180,8 +182,7 @@ const EditorPane = ({
         const loadedMarkers = docSnapshot.data().markers;
         setMarkers(loadedMarkers);
         setRouteLoaded(true); // Indicate that the route has been loaded
-        setCommittedSubroutes([]);
-        setProvisionalSubroutes([]);
+        resetSimulation(); // Reset the simulation
       } else {
         alert('No route found with that name.');
       }

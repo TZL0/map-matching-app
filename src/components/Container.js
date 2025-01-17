@@ -4,22 +4,33 @@ import MapComponent from './MapComponent';
 import EditorPane from './EditorPane';
 
 const Container = () => {
-  const [markers, setMarkers] = useState([]);
-  const [routeName, setRouteName] = useState('');
-  const [simulationStates, setSimulationStates] = useState({ status: 'stopped' });
-  const [simulationData, setSimulationData] = useState({
+  const initialSimulationStates = { status: 'stopped' };
+  const initialSimulationData = {
     items: [],
     activeStates: [],
     atIdx: -1,
-  });
+  };
+
+  const [markers, setMarkers] = useState([]);
+  const [routeName, setRouteName] = useState('');
+  const [simulationStates, setSimulationStates] = useState(initialSimulationStates);
+  const [simulationData, setSimulationData] = useState(initialSimulationData);
   const [committedSubroutes, setCommittedSubroutes] = useState([]);
-  const [activeProvisionalSubroutes, setProvisionalSubroutes] = useState([]);
+  const [activeProvisionalSubroutes, setActiveProvisionalSubroutes] = useState([]);
   const [allProvisionalSubroutes, setAllProvisionalSubroutes] = useState([]);
   const [showOriginalPolylines, setShowOriginalPolylines] = useState(true);
   const [routeLoaded, setRouteLoaded] = useState(false);
 
   // Add showMarkers state
   const [showMarkers, setShowMarkers] = useState(true);
+
+  const resetSimulation = () => {
+    setSimulationStates(initialSimulationStates);
+    setSimulationData(initialSimulationData);
+    setCommittedSubroutes([]);
+    setActiveProvisionalSubroutes([]);
+    setAllProvisionalSubroutes([]);
+  }
 
   // Refs to keep track of the latest state values
   const simulationStatesRef = useRef(simulationStates);
@@ -45,16 +56,8 @@ const Container = () => {
   // Function to reset markers
   const handleResetMarkers = () => {
     setMarkers([]);
-    setCommittedSubroutes([]);
-    setProvisionalSubroutes([]);
-    setAllProvisionalSubroutes([]); // Reset allProvisionalSubroutes
     setShowOriginalPolylines(true);
-    setSimulationData({
-      items: [],
-      activeStates: [],
-      atIdx: -1,
-    });
-    setSimulationStates({ status: 'stopped' });
+    resetSimulation();
     hasSentRequestRef.current = false; // Reset the ref when simulation stops
   };
 
@@ -82,15 +85,7 @@ const Container = () => {
   };
 
   const handleStop = () => {
-    setSimulationStates({ status: 'stopped' });
-    setSimulationData({
-      items: [],
-      activeStates: [],
-      atIdx: -1,
-    });
-    setCommittedSubroutes([]);
-    setProvisionalSubroutes([]);
-    setAllProvisionalSubroutes([]); // Reset allProvisionalSubroutes
+    resetSimulation();
     setShowOriginalPolylines(false);
     hasSentRequestRef.current = false; // Reset the ref when simulation stops
   };
@@ -213,7 +208,7 @@ const Container = () => {
         const newAllProvisional = [...prevAllProvisional, [i, provisionalSubroutes]];
 
         // Move provisional subroutes with end_idx <= committedIdx to committedSubroutes
-        setProvisionalSubroutes((prevProvisional) => {
+        setActiveProvisionalSubroutes((prevProvisional) => {
           let newProvisional = [];
           const committedSubroutesFromProvisional = [];
 
@@ -400,6 +395,7 @@ const Container = () => {
         setRouteLoaded={setRouteLoaded}
         showMarkers={showMarkers}             // Pass showMarkers
         setShowMarkers={setShowMarkers}       // Pass setShowMarkers
+        resetSimulation={resetSimulation}
       />
 
       <EditorPane
@@ -411,12 +407,13 @@ const Container = () => {
         setRouteName={setRouteName}
         handleResetMarkers={handleResetMarkers}
         setCommittedSubroutes={setCommittedSubroutes}
-        setProvisionalSubroutes={setProvisionalSubroutes}
+        setProvisionalSubroutes={setActiveProvisionalSubroutes}
         setShowOriginalPolylines={setShowOriginalPolylines}
         setSimulationData={setSimulationData}
         setSimulationStates={setSimulationStates}
         routeLoaded={routeLoaded}
         setRouteLoaded={setRouteLoaded}
+        resetSimulation={resetSimulation}
       />
     </div>
   );
